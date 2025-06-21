@@ -15,9 +15,14 @@ export function ReservationTimer() {
 
       if (items.length > 0) {
         const now = Date.now()
-        const earliestExpiry = Math.min(...Array.from(reservedSeats.values()))
-        const remaining = Math.max(0, earliestExpiry - now)
-        setTimeLeft(remaining)
+        const expiryTimes = Object.values(reservedSeats)
+        if (expiryTimes.length > 0) {
+          const earliestExpiry = Math.min(...expiryTimes)
+          const remaining = Math.max(0, earliestExpiry - now)
+          setTimeLeft(remaining)
+        } else {
+          setTimeLeft(0)
+        }
       } else {
         setTimeLeft(0)
       }

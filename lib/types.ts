@@ -45,7 +45,19 @@ export interface OrderItem {
   order_id: string
   seat_id: string
   price: number
-  created_at: string
+}
+
+export interface OrderItemWithSeatDetails extends OrderItem {
+  seat: {
+    id: string;
+    row_number: number;
+    seat_number: number;
+    zone: {
+      id: string;
+      name: string;
+      color: string;
+    };
+  };
 }
 
 export interface CartItem {

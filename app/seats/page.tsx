@@ -7,54 +7,39 @@ import { useCartStore } from "@/lib/cart-store"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, ShoppingCart, RefreshCw, Map } from "lucide-react"
+import { ArrowLeft, ShoppingCart, RefreshCw, Map, XIcon } from "lucide-react"
 import Link from "next/link"
-import { SeatSelector } from "@/components/seat-selector"
-import { SeatMapVisual } from "@/components/seat-map-visual"
+import { VenueMap } from "@/components/venue-map"
 import { ReservationTimer } from "@/components/reservation-timer"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { SeatLayout } from "@/components/seat-layout"
 
 export default function SeatsPage() {
   const [zones, setZones] = useState<Zone[]>([])
   const [allSeats, setAllSeats] = useState<Seat[]>([])
-  const [selectedZone, setSelectedZone] = useState<Zone | null>(null)
-  const [seats, setSeats] = useState<Seat[]>([])
+  const [selectedZoneForLayout, setSelectedZoneForLayout] = useState<Zone | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [viewMode, setViewMode] = useState<"list" | "map">("list")
   const { items, getTotalItems, getTotalPrice, addItem, removeItem } = useCartStore()
 
   useEffect(() => {
     fetchData()
   }, [])
 
-  useEffect(() => {
-    if (selectedZone) {
-      const zoneSeats = allSeats.filter((seat) => seat.zone_id === selectedZone.id)
-      setSeats(zoneSeats)
-    }
-  }, [selectedZone, allSeats])
-
   const fetchData = async () => {
     try {
       setLoading(true)
-
-      // Get event first
       const { data: events, error: eventError } = await supabase.from("events").select("id").limit(1).single()
-
       if (eventError) {
         console.error("Error fetching event:", eventError)
         return
       }
-
-      // Fetch zones and all seats in parallel
       const [zonesResult, seatsResult] = await Promise.all([
         supabase.from("zones").select("*").eq("event_id", events.id).order("price", { ascending: false }),
         supabase.from("seats").select("*").order("row_number").order("seat_number"),
       ])
-
       if (zonesResult.error) throw zonesResult.error
       if (seatsResult.error) throw seatsResult.error
-
       setZones(zonesResult.data || [])
       setAllSeats(seatsResult.data || [])
     } catch (error) {
@@ -64,31 +49,23 @@ export default function SeatsPage() {
     }
   }
 
-  const refreshData = async () => {
-    setRefreshing(true)
-    try {
-      await fetchData()
-    } finally {
-      setRefreshing(false)
+  const handleZoneClick = (zone: Zone | null) => {
+    if (zone && zone.name.startsWith('2')) { // Проверяем имя зоны, а не ID
+      setSelectedZoneForLayout(zone)
+    } else {
+      // Для VIP и других зон можно оставить старую логику или тоже сделать модалку
+      console.log("Selected a non-2xx zone:", zone?.name)
     }
   }
 
-  const handleSeatSelect = (seat: Seat) => {
+  const handleSeatSelect = (seat: Seat, zone: Zone) => {
     if (seat.status !== "available") return
 
-    const zone = zones.find((z) => z.id === seat.zone_id)
-    if (!zone) return
-
     const isSelected = items.some((item) => item.seat.id === seat.id)
-
     if (isSelected) {
       removeItem(seat.id)
     } else {
-      addItem({
-        seat,
-        zone,
-        price: zone.price,
-      })
+      addItem({ seat, zone, price: zone.price })
     }
   }
 
@@ -107,7 +84,6 @@ export default function SeatsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white shadow-sm">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -121,11 +97,7 @@ export default function SeatsPage() {
               <h1 className="text-xl font-semibold">🎯 Выбор мест</h1>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={() => setViewMode(viewMode === "list" ? "map" : "list")}>
-                <Map className="h-4 w-4 mr-2" />
-                {viewMode === "list" ? "Схема" : "Список"}
-              </Button>
-              <Button variant="outline" size="sm" onClick={refreshData} disabled={refreshing}>
+              <Button variant="outline" size="sm" onClick={fetchData} disabled={refreshing}>
                 <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />
                 Обновить
               </Button>
@@ -146,142 +118,104 @@ export default function SeatsPage() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <div className="mb-6">
-          <ReservationTimer />
-        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+          {/* Основной контент (карта или схема мест) */}
+          <div className="lg:col-span-2">
+            <div className="mb-4">
+              <ReservationTimer />
+            </div>
 
-        {viewMode === "map" ? (
-          <div className="space-y-6">
-            <SeatMapVisual
-              zones={zones}
-              seats={allSeats}
-              selectedZone={selectedZone}
-              onZoneSelect={setSelectedZone}
-              onSeatSelect={handleSeatSelect}
-              selectedSeats={selectedSeatIds}
-            />
-            {getTotalItems() > 0 && (
-              <Card>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold">Выбрано мест: {getTotalItems()}</p>
-                      <p className="text-lg font-bold text-purple-600">
-                        Итого: {getTotalPrice().toLocaleString("ru-RU")} ₽
-                      </p>
-                    </div>
-                    <Link href="/cart">
-                      <Button size="lg" className="bg-purple-600 hover:bg-purple-700">
-                        🚀 Перейти к оформлению
-                      </Button>
-                    </Link>
-                  </div>
-                </CardContent>
-              </Card>
+            {!selectedZoneForLayout ? (
+              <VenueMap
+                zones={zones}
+                seats={allSeats}
+                selectedZone={selectedZoneForLayout}
+                onZoneSelect={handleZoneClick}
+                selectedSeats={selectedSeatIds}
+              />
+            ) : (
+              <div>
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedZoneForLayout(null)}
+                  className="mb-4"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Назад к выбору зон
+                </Button>
+                <SeatLayout
+                  zone={selectedZoneForLayout}
+                  seats={allSeats.filter(s => s.zone_id === selectedZoneForLayout.id)}
+                  onSeatSelect={handleSeatSelect}
+                  selectedSeats={selectedSeatIds}
+                />
+              </div>
             )}
           </div>
-        ) : (
-          <div className="grid lg:grid-cols-4 gap-8">
-            {/* Zone Selection */}
-            <div className="lg:col-span-1">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Выберите зону</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {zones.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Зоны не найдены. Проверьте настройку базы данных.</p>
-                  ) : (
-                    zones.map((zone) => (
-                      <Button
-                        key={zone.id}
-                        variant={selectedZone?.id === zone.id ? "default" : "outline"}
-                        className="w-full justify-between"
-                        onClick={() => setSelectedZone(zone)}
-                      >
-                        <span>{zone.name}</span>
-                        <span className="font-semibold">{zone.price.toLocaleString("ru-RU")} ₽</span>
-                      </Button>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
 
-              {/* Legend */}
-              <Card className="mt-4">
-                <CardHeader>
-                  <CardTitle className="text-sm">Обозначения</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 bg-green-500 rounded"></div>
-                    <span className="text-sm">Свободно</span>
+          {/* Сайдбар с корзиной */}
+          <div className="lg:col-span-1 sticky top-8">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShoppingCart className="h-5 w-5" />
+                  Ваш выбор
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {getTotalItems() === 0 ? (
+                  <div className="text-center text-gray-500 py-8">
+                    <p>Выберите места на схеме,</p>
+                    <p>и они появятся здесь.</p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 bg-yellow-500 rounded"></div>
-                    <span className="text-sm">Забронировано</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 bg-red-500 rounded"></div>
-                    <span className="text-sm">Занято</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 bg-blue-500 rounded"></div>
-                    <span className="text-sm">Выбрано</span>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Seat Selection */}
-            <div className="lg:col-span-3">
-              {!selectedZone ? (
-                <Card className="h-96 flex items-center justify-center">
-                  <CardContent>
-                    <div className="text-center">
-                      <h3 className="text-lg font-semibold mb-2">Выберите зону</h3>
-                      <p className="text-muted-foreground">
-                        Сначала выберите зону в левой панели, чтобы увидеть доступные места
-                      </p>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="max-h-80 overflow-y-auto space-y-3 pr-2">
+                      {items.map(item => (
+                        <div key={item.seat.id} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                          <div>
+                            <p className="font-semibold">Зона {item.zone.name}</p>
+                            <p className="text-sm text-gray-600">
+                              Ряд {String.fromCharCode(64 + item.seat.row_number)}, Место {item.seat.seat_number}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <p className="font-semibold text-sm">{item.price.toLocaleString("ru-RU")} ₽</p>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-gray-500 hover:text-red-500"
+                              onClick={() => removeItem(item.seat.id)}
+                            >
+                              <XIcon className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold">
-                      {selectedZone.name} - {selectedZone.price.toLocaleString("ru-RU")} ₽
-                    </h2>
-                    {getTotalItems() > 0 && (
-                      <div className="text-right">
-                        <p className="text-sm text-muted-foreground">Выбрано мест: {getTotalItems()}</p>
-                        <p className="font-semibold">Итого: {getTotalPrice().toLocaleString("ru-RU")} ₽</p>
-                      </div>
-                    )}
+                    <div className="border-t pt-4 space-y-4">
+                       <div className="flex items-center justify-between">
+                          <p className="font-semibold">Выбрано мест:</p>
+                          <p className="text-lg font-bold">{getTotalItems()}</p>
+                       </div>
+                       <div className="flex items-center justify-between">
+                          <p className="font-semibold">Итого:</p>
+                          <p className="text-lg font-bold text-purple-600">
+                            {getTotalPrice().toLocaleString("ru-RU")} ₽
+                          </p>
+                       </div>
+                       <Link href="/cart" className="w-full">
+                          <Button size="lg" className="w-full bg-purple-600 hover:bg-purple-700">
+                            🚀 Перейти к оформлению
+                          </Button>
+                        </Link>
+                    </div>
                   </div>
-                  <SeatSelector zone={selectedZone} seats={seats} />
-                </div>
-              )}
-            </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
-        )}
-
-        {/* Fixed Bottom Bar */}
-        {getTotalItems() > 0 && viewMode === "list" && (
-          <div className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-4">
-            <div className="container mx-auto flex items-center justify-between">
-              <div>
-                <p className="font-semibold">Выбрано мест: {getTotalItems()}</p>
-                <p className="text-lg font-bold text-purple-600">Итого: {getTotalPrice().toLocaleString("ru-RU")} ₽</p>
-              </div>
-              <Link href="/cart">
-                <Button size="lg" className="bg-purple-600 hover:bg-purple-700">
-                  🚀 Перейти к оформлению
-                </Button>
-              </Link>
-            </div>
-          </div>
-        )}
+        </div>
       </main>
     </div>
   )
