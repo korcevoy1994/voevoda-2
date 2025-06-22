@@ -1,11 +1,22 @@
 export interface Event {
-  id: string
-  title: string
-  description: string
-  event_date: string
-  venue: string
-  poster_url: string
-  created_at: string
+  id: number;
+  name: string;
+  description: string | null;
+  venue_name: string;
+  venue_address: string;
+  event_date: string;
+  phone_number: string | null;
+}
+
+export interface Performer {
+  id: number;
+  name: string;
+  image_url: string | null;
+}
+
+export interface PriceRange {
+  min_price: number | null;
+  max_price: number | null;
 }
 
 export interface Zone {
@@ -52,6 +63,7 @@ export interface OrderItemWithSeatDetails extends OrderItem {
     id: string;
     row_number: number;
     seat_number: number;
+    status: "available" | "reserved" | "sold" | "used";
     zone: {
       id: string;
       name: string;

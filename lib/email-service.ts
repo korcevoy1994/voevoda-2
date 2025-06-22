@@ -1,3 +1,5 @@
+import nodemailer from "nodemailer"
+
 interface EmailData {
   to: string
   subject: string
@@ -10,20 +12,30 @@ interface EmailData {
 }
 
 export async function sendEmail(data: EmailData): Promise<boolean> {
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: Number(process.env.SMTP_PORT) === 465, // true for 465, false for other ports
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  })
+
   try {
-    // In a real application, you would use a service like:
-    // - Supabase Edge Functions with Resend
-    // - SendGrid
-    // - Nodemailer with SMTP
+    await transporter.sendMail({
+      from: `"Povestea de Iarnă" <${process.env.SMTP_USER}>`,
+      to: data.to,
+      subject: data.subject,
+      html: data.html,
+      attachments: data.attachments?.map((att) => ({
+        filename: att.filename,
+        content: att.content,
+        contentType: att.contentType,
+      })),
+    })
 
-    console.log("Sending email to:", data.to)
-    console.log("Subject:", data.subject)
-    console.log("HTML content length:", data.html.length)
-    console.log("Attachments:", data.attachments?.length || 0)
-
-    // Simulate email sending
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
+    console.log("Email sent successfully to:", data.to)
     return true
   } catch (error) {
     console.error("Error sending email:", error)

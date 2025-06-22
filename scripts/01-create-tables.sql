@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS seats (
   seat_number INTEGER NOT NULL,
   x_coordinate DECIMAL(5,2),
   y_coordinate DECIMAL(5,2),
-  status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'reserved', 'sold')),
+  status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'reserved', 'sold', 'used')),
   reserved_until TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(zone_id, row_number, seat_number)

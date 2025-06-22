@@ -11,31 +11,34 @@ export type Database = {
     Tables: {
       events: {
         Row: {
-          created_at: string | null
+          created_at: string
           description: string | null
           event_date: string
-          id: string
-          poster_url: string | null
-          title: string
-          venue: string
+          id: number
+          name: string
+          phone_number: string | null
+          venue_address: string
+          venue_name: string
         }
         Insert: {
-          created_at?: string | null
+          created_at?: string
           description?: string | null
           event_date: string
-          id?: string
-          poster_url?: string | null
-          title: string
-          venue: string
+          id?: never
+          name: string
+          phone_number?: string | null
+          venue_address: string
+          venue_name: string
         }
         Update: {
-          created_at?: string | null
+          created_at?: string
           description?: string | null
           event_date?: string
-          id?: string
-          poster_url?: string | null
-          title?: string
-          venue?: string
+          id?: never
+          name?: string
+          phone_number?: string | null
+          venue_address?: string
+          venue_name?: string
         }
         Relationships: []
       }
@@ -110,6 +113,38 @@ export type Database = {
           user_phone?: string | null
         }
         Relationships: []
+      }
+      performers: {
+        Row: {
+          id: number
+          event_id: number
+          name: string
+          image_url: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: never
+          event_id: number
+          name: string
+          image_url?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: never
+          event_id?: number
+          name?: string
+          image_url?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "performers_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       seats: {
         Row: {

@@ -1,57 +1,70 @@
 const { createClient } = require('@supabase/supabase-js')
 const fs = require('fs')
+const path = require('path')
 
-// Загружаем переменные окружения
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+// Load environment variables from .env.local
+require('dotenv').config({ path: path.resolve(__dirname, '../.env.local') })
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-async function runSQL() {
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error(
+    'Error: Missing Supabase URL or service role key. Please check your .env.local file.'
+  )
+  process.exit(1)
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+// This helper function MUST exist in your Supabase SQL Editor.
+// See the instructions in the README or previous messages.
+const HELPER_FUNCTION_NAME = 'exec_sql'
+const CHUNK_SEPARATOR = '-- SPLIT --'
+
+async function runSqlFile(filePath) {
   try {
-    // Этап 1: Создание или обновление функции exec_sql
-    console.log('Этап 1: Создание/обновление функции exec_sql...')
-    const execSqlFunctionContent = `
-      CREATE OR REPLACE FUNCTION exec_sql(sql_query text)
-      RETURNS void AS $$
-      BEGIN
-        EXECUTE sql_query;
-      END;
-      $$ LANGUAGE plpgsql;
-    `;
-    // Для создания функции мы не можем использовать rpc('exec_sql'), так как ее еще нет.
-    // Вместо этого мы можем использовать стандартный API Supabase для выполнения запросов, 
-    // но это сложнее. Проще всего создать ее один раз через SQL Editor в Supabase.
-    // Однако, попробуем через rpc('sql') - это может не сработать.
-    // Правильный способ - создать эту функцию один раз вручную в дашборде Supabase.
-    // Для этого воркфлоу, я предполагаю, что вы можете создать ее вручную.
-    // Я оставлю код для создания второй функции.
-    
-    console.log('Предполагается, что функция exec_sql уже существует или создана вручную.');
-    
-    // Этап 2: Создание функции get_order_details
-    console.log('Этап 2: Создание функции get_order_details...')
-    const orderDetailsFunctionContent = fs.readFileSync('./scripts/10-add-order-details-function.sql', 'utf8')
-    const { error } = await supabase.rpc('exec_sql', { sql_query: orderDetailsFunctionContent })
-    
-    if (error) {
-      // Если ошибка в том, что exec_sql не найдена, дадим инструкцию
-      if (error.message.includes('function exec_sql')) {
-          console.error('\x1b[31m%s\x1b[0m', 'Критическая ошибка: Вспомогательная функция `exec_sql` не найдена.');
-          console.error('Пожалуйста, создайте ее вручную в вашем Supabase проекте (SQL Editor):');
-          console.error('\x1b[33m%s\x1b[0m', execSqlFunctionContent);
-          return;
+    console.log(`Reading SQL file: ${filePath}...`)
+    const sqlContent = fs.readFileSync(filePath, 'utf8')
+    const sqlChunks = sqlContent.split(CHUNK_SEPARATOR)
+
+    console.log(`Found ${sqlChunks.length} chunk(s) to execute.`)
+
+    for (let i = 0; i < sqlChunks.length; i++) {
+      const chunk = sqlChunks[i].trim()
+      if (chunk.length === 0) continue
+
+      console.log(`Executing chunk ${i + 1}/${sqlChunks.length}...`)
+      const { error } = await supabase.rpc(HELPER_FUNCTION_NAME, {
+        sql_query: chunk,
+      })
+
+      if (error) {
+        console.error(
+          `\x1b[31mError executing chunk ${i + 1}:\x1b[0m`,
+          error.message
+        )
+        process.exit(1)
       }
-      console.error('Ошибка выполнения SQL для get_order_details:', error)
-      return
     }
-    
-    console.log('SQL для создания get_order_details выполнен успешно!')
-  } catch (error) {
-    console.error('Ошибка:', error)
+
+    console.log(
+      `\x1b[32mSuccessfully executed all chunks from ${filePath}\x1b[0m`
+    )
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      console.error(`Error: File not found at ${filePath}`)
+    } else {
+      console.error('An unexpected error occurred:', err)
+    }
+    process.exit(1)
   }
 }
 
-runSQL() 
+const filePath = process.argv[2]
+if (!filePath) {
+  console.error('Error: Please provide the path to the SQL file to execute.')
+  process.exit(1)
+}
+
+runSqlFile(path.resolve(process.cwd(), filePath)) 

@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { generatePDF } from "@/lib/pdf-generator"
+import { generateTicketPdf } from "@/lib/pdf-generator"
 import { generateTicketEmail, sendEmail } from "@/lib/email-service"
+import type { Order, OrderItemWithSeatDetails } from '@/lib/types';
 
 // Схема валидации для входящих данных
 const orderSchema = z.object({
@@ -16,6 +17,12 @@ const orderSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  // Создаем клиент с правами администратора для выполнения серверных операций
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   try {
     const body = await request.json();
 
@@ -107,11 +114,120 @@ export async function POST(request: Request) {
        throw new Error(`Ошибка обновления статуса мест: ${updateSeatsError.message}`);
     }
 
-    // 4. Отправка ответа
+    // 5. Генерация PDF и отправка email (НОВЫЙ БЛОК)
+    try {
+      // Получаем полные данные о заказе и местах для PDF и Email
+      const { data: newOrderData, error: newOrderError } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          order_items (
+            *,
+            seats (
+              *,
+              zones (*)
+            )
+          )
+        `)
+        .eq('id', orderId)
+        .single();
+      
+      if (newOrderError) throw new Error(`Ошибка получения данных заказа для PDF: ${newOrderError.message}`);
+
+      const orderWithItems = newOrderData as any;
+
+      const orderForPdf: Order = {
+        id: orderWithItems.id,
+        user_name: orderWithItems.user_name,
+        user_email: orderWithItems.user_email,
+        total_amount: orderWithItems.total_amount,
+        status: orderWithItems.status,
+        created_at: orderWithItems.created_at,
+      };
+
+      const itemsForPdf: OrderItemWithSeatDetails[] = orderWithItems.order_items.map((item: any) => ({
+        id: item.id,
+        order_id: item.order_id,
+        seat_id: item.seat_id,
+        price: item.price,
+        seat: {
+          id: item.seats.id,
+          row_number: item.seats.row_number,
+          seat_number: item.seats.seat_number,
+          zone: {
+            id: item.seats.zones.id,
+            name: item.seats.zones.name,
+            color: item.seats.zones.color,
+          }
+        }
+      }));
+
+      // Генерируем PDF
+      const pdfBytes = await generateTicketPdf(orderForPdf, itemsForPdf);
+      const pdfBuffer = Buffer.from(pdfBytes);
+      const pdfFileName = `ticket-order-${orderId}.pdf`;
+      const pdfPath = `${orderId}/${pdfFileName}`;
+
+      // Загружаем PDF в Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('tickets')
+        .upload(pdfPath, pdfBuffer, {
+          contentType: 'application/pdf',
+          upsert: true,
+        });
+
+      if (uploadError) throw new Error(`Ошибка загрузки PDF в Storage: ${uploadError.message}`);
+
+      // Получаем публичный URL
+      const { data: publicUrlData } = supabase.storage
+        .from('tickets')
+        .getPublicUrl(pdfPath);
+
+      const pdfUrl = publicUrlData.publicUrl;
+
+      // Обновляем заказ, добавляя ссылку на PDF
+      await supabase
+        .from('orders')
+        .update({ pdf_url: pdfUrl })
+        .eq('id', orderId);
+
+      // Готовим данные для email
+      const emailHtml = generateTicketEmail({
+        userName: name,
+        orderId: orderId,
+        totalAmount: orderForPdf.total_amount,
+        items: itemsForPdf.map(i => ({
+          zoneName: i.seat.zone.name,
+          rowNumber: i.seat.row_number,
+          seatNumber: i.seat.seat_number,
+          price: i.price,
+        })),
+      });
+
+      // Отправляем email с PDF вложением
+      await sendEmail({
+        to: email,
+        subject: `Ваши билеты на концерт! Заказ #${orderId}`,
+        html: emailHtml, // Используем сгенерированный HTML
+        attachments: [
+          {
+            filename: pdfFileName,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+
+    } catch(emailOrPdfError) {
+      // Не фатально, заказ уже создан. Просто логируем ошибку.
+      console.error(`Ошибка при генерации PDF или отправке email для заказа ${orderId}:`, emailOrPdfError);
+    }
+    
+    // 6. Отправка ответа (было 4)
     return NextResponse.json({
       success: true,
       orderId,
-      message: 'Заказ успешно создан!',
+      message: 'Заказ успешно создан! Билеты отправлены на вашу почту.',
     });
 
   } catch (error: any) {

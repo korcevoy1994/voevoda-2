@@ -46,6 +46,7 @@ export default function OrderSuccessPage() {
   const orderId = searchParams.get("orderId")
   const [order, setOrder] = useState<Order | null>(null)
   const [items, setItems] = useState<OrderItemWithSeatDetails[]>([])
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -58,30 +59,48 @@ export default function OrderSuccessPage() {
         setLoading(true);
         setError(null);
         try {
-            const data = await fetchOrderWithRetries(orderId);
+            const { data, error } = await supabase
+                .from('orders')
+                .select(`
+                    *,
+                    order_items (
+                        *,
+                        seats (
+                            *,
+                            zones (*)
+                        )
+                    )
+                `)
+                .eq('id', orderId)
+                .single();
 
+            if (error) throw error;
+            
             if(data) {
-                const firstItem = data[0];
                 setOrder({
-                    id: firstItem.order_id,
-                    user_name: firstItem.user_name,
-                    user_email: firstItem.user_email,
-                    total_amount: firstItem.total_amount,
-                    created_at: firstItem.order_created_at,
-                    status: "completed",
+                    id: data.id,
+                    user_name: data.user_name,
+                    user_email: data.user_email,
+                    total_amount: data.total_amount,
+                    created_at: data.created_at,
+                    status: data.status,
+                    pdf_url: data.pdf_url,
                 });
+                setPdfUrl(data.pdf_url);
 
-                const formattedItems: OrderItemWithSeatDetails[] = data.map((item: any) => ({
-                    id: item.item_id,
-                    price: item.item_price,
+                const formattedItems: OrderItemWithSeatDetails[] = data.order_items.map((item: any) => ({
+                    id: item.id,
+                    order_id: item.order_id,
+                    price: item.price,
+                    seat_id: item.seat_id,
                     seat: {
-                        id: item.seat_id,
-                        row_number: item.row_number,
-                        seat_number: item.seat_number,
+                        id: item.seats.id,
+                        row_number: item.seats.row_number,
+                        seat_number: item.seats.seat_number,
                         zone: {
-                            id: item.zone_id,
-                            name: item.zone_name,
-                            color: item.zone_color,
+                            id: item.seats.zones.id,
+                            name: item.seats.zones.name,
+                            color: item.seats.zones.color,
                         }
                     }
                 }));
@@ -157,9 +176,11 @@ export default function OrderSuccessPage() {
         </Card>
 
          <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
-            <Button className="w-full sm:w-auto" disabled>
-                <Download className="h-4 w-4 mr-2" />
-                Скачать PDF (скоро)
+            <Button asChild className="w-full sm:w-auto" disabled={!pdfUrl}>
+                <a href={pdfUrl || '#'} download={`ticket-order-${order.id}.pdf`}>
+                    <Download className="h-4 w-4 mr-2" />
+                    {pdfUrl ? 'Скачать PDF' : 'PDF создается...'}
+                </a>
             </Button>
              <Link href="/" className="w-full sm:w-auto">
                 <Button variant="outline" className="w-full">
