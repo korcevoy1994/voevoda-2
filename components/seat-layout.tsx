@@ -144,7 +144,9 @@ export function SeatLayout({ zone, seats, onSeatSelect, selectedSeats }: SeatLay
                     <Tooltip key={seat.id}>
                       <TooltipTrigger asChild>
                         <g
-                          onClick={() => onSeatSelect(seat, zone)}
+                          onClick={() => {
+                            if (seat.status === "available") onSeatSelect(seat, zone)
+                          }}
                           className="cursor-pointer transition-transform duration-200 hover:scale-110"
                           style={{ transformOrigin: `${seat.x_coordinate}px ${seat.y_coordinate}px` }}
                         >

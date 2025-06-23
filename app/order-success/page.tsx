@@ -75,7 +75,7 @@ export default function OrderSuccessPage() {
                 .single();
 
             if (error) throw error;
-            
+
             if(data) {
                 setOrder({
                     id: data.id,
@@ -178,7 +178,7 @@ export default function OrderSuccessPage() {
          <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
             <Button asChild className="w-full sm:w-auto" disabled={!pdfUrl}>
                 <a href={pdfUrl || '#'} download={`ticket-order-${order.id}.pdf`}>
-                    <Download className="h-4 w-4 mr-2" />
+                <Download className="h-4 w-4 mr-2" />
                     {pdfUrl ? 'Скачать PDF' : 'PDF создается...'}
                 </a>
             </Button>

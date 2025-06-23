@@ -38,8 +38,8 @@ async function runSqlFile(filePath) {
       const { error } = await supabase.rpc(HELPER_FUNCTION_NAME, {
         sql_query: chunk,
       })
-
-      if (error) {
+    
+    if (error) {
         console.error(
           `\x1b[31mError executing chunk ${i + 1}:\x1b[0m`,
           error.message

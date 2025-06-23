@@ -1,54 +1,132 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useCartStore } from "@/lib/cart-store"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ArrowLeft, ShoppingCart, CreditCard, User, Mail, Phone, Loader2 } from "lucide-react"
+import { ArrowLeft, ShoppingCart, CreditCard, User, Mail, Phone, Loader2, XIcon } from "lucide-react"
 import Link from "next/link"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import * as z from "zod"
-import { toast } from "sonner"
-
-
-const formSchema = z.object({
-  name: z.string().min(2, { message: "Имя должно содержать не менее 2 символов." }),
-  email: z.string().email({ message: "Введите корректный email." }),
-  phone: z.string().min(5, { message: "Введите корректный номер телефона." }),
-})
-
-type FormData = z.infer<typeof formSchema>
 
 export default function CartPage() {
   const router = useRouter()
-  const { items, getTotalItems, getTotalPrice, removeItem, clearCart } = useCartStore()
-  const [isLoading, setIsLoading] = useState(false)
+  const [selectedSeatIds, setSelectedSeatIds] = useState<string[]>([])
+  const [seats, setSeats] = useState<any[]>([])
+  const [zones, setZones] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [phone, setPhone] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const form = useForm<FormData>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      name: "",
-      email: "",
-      phone: "",
-    },
-  })
-  
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = form
+  useEffect(() => {
+    // Читаем выбранные места из localStorage
+    const stored = localStorage.getItem('selectedSeats')
+    if (stored) {
+      try {
+        const arr = JSON.parse(stored)
+        if (Array.isArray(arr)) setSelectedSeatIds(arr.filter((x: any) => typeof x === 'string'))
+      } catch {}
+    }
+  }, [])
 
-  if (items.length === 0 && !isLoading) {
+  useEffect(() => {
+    if (selectedSeatIds.length === 0) {
+      setLoading(false)
+      return
+    }
+    // Грузим инфу о местах и зонах
+    const fetchData = async () => {
+      setLoading(true)
+      const { data: seatsData } = await fetchSeats(selectedSeatIds)
+      setSeats(Array.isArray(seatsData) ? seatsData : [])
+      // Получаем уникальные zone_id
+      const zoneIds: string[] = Array.from(
+        new Set(
+          (Array.isArray(seatsData) ? seatsData : []).map((s: any) =>
+            s && typeof s.zone_id !== "undefined" ? String(s.zone_id) : ""
+          )
+        )
+      );
+      const zoneIdsFiltered = zoneIds.filter(Boolean);
+      const { data: zonesData } = await fetchZones(zoneIdsFiltered);
+      setZones(zonesData || []);
+      setLoading(false);
+    }
+    fetchData()
+  }, [selectedSeatIds])
+
+  const fetchSeats = async (ids: string[]) => {
+    const { data, error } = await fetch(`/api/seats?ids=${ids.join(',')}`).then(r => r.json())
+    return { data, error }
+  }
+  const fetchZones = async (ids: string[]) => {
+    const { data, error } = await fetch(`/api/zones?ids=${ids.join(',')}`).then(r => r.json())
+    return { data, error }
+  }
+
+  // Собираем билеты для отображения
+  const tickets = seats.map(seat => {
+    const zone = zones.find(z => z.id === seat.zone_id)
+    return zone ? {
+      id: seat.id,
+      sector: zone.name,
+      row: String.fromCharCode(64 + seat.row_number),
+      seat: String(seat.seat_number),
+      price: zone.price,
+    } : null
+  }).filter((t): t is {id: string, sector: string, row: string, seat: string, price: number} => Boolean(t))
+
+  const total = tickets.reduce((sum, t) => sum + t.price, 0)
+
+  const handleRemove = (id: string) => {
+    const newIds = selectedSeatIds.filter(sid => sid !== id)
+    setSelectedSeatIds(newIds)
+    localStorage.setItem('selectedSeats', JSON.stringify(newIds))
+  }
+
+  const handleOrder = async () => {
+    setError(null)
+    setIsSubmitting(true)
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          email,
+          phone,
+          items: tickets.map(t => ({ seat_id: t.id, price: t.price })),
+        }),
+      })
+      const data = await res.json()
+      if (res.ok && data.orderId) {
+        setSelectedSeatIds([])
+        localStorage.removeItem('selectedSeats')
+        setName("")
+        setEmail("")
+        setPhone("")
+        router.push(`/order-success?orderId=${data.orderId}`)
+      } else {
+        setError(data.error || 'Ошибка оформления заказа')
+      }
+    } catch (e: any) {
+      setError(e.message || 'Ошибка оформления заказа')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const isFormValid = name.length > 1 && email.includes('@') && tickets.length > 0
+
+  if (!loading && selectedSeatIds.length === 0) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center text-center bg-gray-50">
         <ShoppingCart className="h-16 w-16 text-gray-400 mb-4" />
-        <h2 className="text-2xl font-semibold mb-2">Ваша корзина пуста</h2>
-        <p className="text-gray-500 mb-6">Самое время выбрать лучшие места!</p>
+        <h2 className="text-2xl font-semibold mb-2">Нет выбранных мест</h2>
+        <p className="text-gray-500 mb-6">Сначала выберите места на схеме.</p>
         <Link href="/seats">
           <Button>
             <ArrowLeft className="h-4 w-4 mr-2" />К выбору мест
@@ -56,44 +134,6 @@ export default function CartPage() {
         </Link>
       </div>
     )
-  }
-
-  const onSubmit = async (data: FormData) => {
-    setIsLoading(true);
-    const promise = () => new Promise(async (resolve, reject) => {
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...data,
-          items: items.map(item => ({
-            seat_id: item.seat.id,
-            price: item.price,
-          })),
-        }),
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        resolve(result);
-      } else {
-        reject(result);
-      }
-    });
-
-    toast.promise(promise(), {
-      loading: 'Создаем ваш заказ...',
-      success: (data: any) => {
-        clearCart();
-        router.push(`/order-success?orderId=${data.orderId}`);
-        return `Заказ #${data.orderId} успешно создан!`;
-      },
-      error: (err) => {
-        setIsLoading(false);
-        return `Ошибка: ${err.error || 'Не удалось создать заказ.'}`;
-      },
-    });
   }
 
   return (
@@ -112,7 +152,7 @@ export default function CartPage() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-         <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+         <form onSubmit={e => { e.preventDefault(); if (isFormValid) handleOrder(); }} className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
             {/* Форма для данных пользователя */}
             <div className="lg:col-span-2">
                <Card>
@@ -122,18 +162,15 @@ export default function CartPage() {
                 <CardContent className="space-y-4">
                   <div>
                      <Label htmlFor="name" className="flex items-center gap-2 mb-1"><User className="h-4 w-4" />Ваше имя</Label>
-                    <Input id="name" {...register("name")} placeholder="Иван Петров" />
-                     {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>}
+                    <Input id="name" value={name} onChange={e => setName(e.target.value)} placeholder="Иван Петров" required minLength={2} />
                   </div>
                   <div>
                     <Label htmlFor="email" className="flex items-center gap-2 mb-1"><Mail className="h-4 w-4" />Email</Label>
-                    <Input id="email" type="email" {...register("email")} placeholder="example@mail.com" />
-                     {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>}
+                    <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="example@mail.com" required />
                   </div>
                   <div>
                     <Label htmlFor="phone" className="flex items-center gap-2 mb-1"><Phone className="h-4 w-4" />Номер телефона</Label>
-                    <Input id="phone" {...register("phone")} placeholder="+7 (999) 123-45-67" />
-                     {errors.phone && <p className="text-red-500 text-sm mt-1">{errors.phone.message}</p>}
+                    <Input id="phone" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+373 60000000" />
                   </div>
                 </CardContent>
               </Card>
@@ -147,12 +184,18 @@ export default function CartPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                    <div className="max-h-60 overflow-y-auto space-y-3 pr-2">
-                      {items.map(item => (
-                        <div key={item.seat.id} className="flex items-start justify-between text-sm">
+                      {tickets.map(ticket => (
+                        <div key={ticket.id} className="flex items-start justify-between text-sm bg-gray-100 rounded-lg px-3 py-2">
                           <div>
-                            <p>Зона {item.zone.name}, Ряд {String.fromCharCode(64 + item.seat.row_number)}, М. {item.seat.seat_number}</p>
+                            <span className="bg-yellow-400 text-black text-xs font-bold px-2 py-1 rounded-full uppercase tracking-widest mr-2">{ticket.sector}</span>
+                            Ряд {ticket.row}, М. {ticket.seat}
                           </div>
-                          <p className="font-semibold whitespace-nowrap">{item.price.toLocaleString("ru-RU")} ₽</p>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold whitespace-nowrap">{ticket.price.toLocaleString("ru-RU")} лей</span>
+                            <button onClick={() => handleRemove(ticket.id)} className="p-1 rounded-full hover:bg-yellow-400 transition group">
+                              <XIcon className="h-4 w-4 text-yellow-400 group-hover:text-black" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -160,17 +203,18 @@ export default function CartPage() {
                        <div className="flex items-center justify-between font-bold text-lg">
                           <p>Итого:</p>
                           <p className="text-purple-600">
-                            {getTotalPrice().toLocaleString("ru-RU")} ₽
+                            {total.toLocaleString("ru-RU")} лей
                           </p>
                        </div>
-                        <Button type="submit" size="lg" className="w-full bg-purple-600 hover:bg-purple-700" disabled={isLoading}>
-                           {isLoading ? (
+                        <Button type="submit" size="lg" className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold text-lg py-3 rounded-xl transition disabled:opacity-60" disabled={!isFormValid || isSubmitting}>
+                           {isSubmitting ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                            ) : (
                             <CreditCard className="mr-2 h-4 w-4" />
                            )}
-                          Оплатить и получить билеты
+                          Оформить заказ
                         </Button>
+                        {error && <div className="text-red-500 text-sm text-center">{error}</div>}
                     </div>
                 </CardContent>
               </Card>
